@@ -1,6 +1,7 @@
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+import pandas as pd  # Added for CSV generation
 
 # 1. Environment Setup
 moisture_states = ["Dry", "Optimal", "Wet"] 
@@ -20,7 +21,6 @@ alpha = 0.2
 gamma = 0.9
 epsilon = 1.0
 min_epsilon = 0.05
-# Adjusted decay rate so epsilon safely drops across 100 episodes
 decay_rate = 0.02 
 
 num_episodes = 100
@@ -57,6 +57,9 @@ def simulate_environment(state, action):
 print("Running Training Phase (100 Episodes)...")
 episode_avg_rewards = []
 
+# Container to hold step-by-step logs for CSV export
+training_logs = []
+
 for episode in range(num_episodes):
     current_state = random.choice(state_space)
     total_episode_reward = 0
@@ -77,6 +80,21 @@ for episode in range(num_episodes):
         next_idx = state_space.index(next_state)
         best_future_q = np.max(q_table[next_idx])
         
+        # Log data before transitioning state variables
+        training_logs.append({
+            "Episode": episode + 1,
+            "Step": step + 1,
+            "State_Moisture": current_state[0],
+            "State_Temperature": current_state[1],
+            "State_Sunlight": current_state[2],
+            "Action": action,
+            "Reward": reward,
+            "Next_Moisture": next_state[0],
+            "Next_Temperature": next_state[1],
+            "Next_Sunlight": next_state[2],
+            "Epsilon": round(epsilon, 4)
+        })
+        
         q_table[state_idx, action_idx] += alpha * (reward + gamma * best_future_q - q_table[state_idx, action_idx])
         current_state = next_state
         
@@ -86,8 +104,12 @@ for episode in range(num_episodes):
     avg_reward = total_episode_reward / steps_per_episode
     episode_avg_rewards.append(avg_reward)
 
-# 2. VALIDATION PHASE
+# Export collected logs to a CSV File
+df_logs = pd.DataFrame(training_logs)
+df_logs.to_csv("rl_greenhouse_training_logs.csv", index=False)
+print("Training data successfully saved to 'rl_greenhouse_training_logs.csv'!")
 
+# 2. VALIDATION PHASE
 print("Running Validation Phase...")
 validation_rewards = []
 for _ in range(10):
@@ -101,7 +123,6 @@ for _ in range(10):
     validation_rewards.append(total_val_reward / steps_per_episode)
 
 # 3. TESTING PHASE WITH ENVIRONMENT TRACKING
-
 print("Running Live Testing Phase...")
 test_steps = 100
 test_state = random.choice(state_space)
@@ -127,7 +148,6 @@ for _ in range(test_steps):
 print("Testing complete. Plotting results...")
 
 # PLOTTING
-
 # Training Evaluation (Average Reward per Episode)
 plt.figure(figsize=(10, 4))
 plt.plot(range(1, num_episodes + 1), episode_avg_rewards, color='teal', marker='o', markersize=4, linestyle='-', linewidth=1.5, label='Avg Reward per Episode')
