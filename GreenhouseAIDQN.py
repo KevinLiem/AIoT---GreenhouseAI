@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import pandas as pd
+import pandas as pd  # Added for CSV generation
 
 # ==========================================
 # 1. ENVIRONMENT & REWARD SYSTEM SELECTION
@@ -23,7 +23,7 @@ state_space = [(m, t, s) for m in moisture_states for t in temp_states for s in 
 # DQN Parameters
 alpha = 0.01          # Learning rate for the neural network optimizer
 gamma = 0.9           # Discount factor for future rewards
-epsilon = 1.0         # Exploration rate
+epsilon = 0.9         # Exploration rate
 min_epsilon = 0.05    # Minimum exploration floor
 decay_rate = 0.02     # Epsilon decay per episode
 
@@ -94,6 +94,9 @@ loss_fn = nn.MSELoss()
 # ==========================================
 print("Running Deep Q-Network Training Phase (100 Episodes)...")
 episode_avg_rewards = []
+episode_penalties = []
+episode_val_rewards = []
+episode_val_penalties = []
 
 # Container to hold step-by-step logs for CSV export
 training_logs = []
@@ -101,11 +104,12 @@ training_logs = []
 for episode in range(num_episodes):
     current_state = random.choice(state_space)
     total_episode_reward = 0
+    training_penalties_count = 0
     
     for step in range(steps_per_episode):
-        # Predict Q-values from Neural Network
-        optimizer.zero_grad()
         state_tensor = state_to_tensor(current_state)
+        
+        # Predict Q-values from Neural Network
         q_values = dqn_brain(state_tensor)
         
         # Epsilon-Greedy Exploration Action Choice
@@ -114,26 +118,14 @@ for episode in range(num_episodes):
         else:
             action_idx = torch.argmax(q_values).item()
             
+        action = actions[action_idx]
         reward = get_reward(current_state, action_idx)
         total_episode_reward += reward
-        
+        if reward < 0:
+            training_penalties_count += 1
+            
         next_state = simulate_environment(current_state, action_idx)
         next_tensor = state_to_tensor(next_state)
-        
-        # Log data before transitioning state variables
-        training_logs.append({
-            "Episode": episode + 1,
-            "Step": step + 1,
-            "State_Moisture": current_state[0],
-            "State_Temperature": current_state[1],
-            "State_Sunlight": current_state[2],
-            "Action": actions[action_idx],
-            "Reward": reward,
-            "Next_Moisture": next_state[0],
-            "Next_Temperature": next_state[1],
-            "Next_Sunlight": next_state[2],
-            "Epsilon": round(epsilon, 4)
-        })
         
         # Calculate Target Q-value using Bellman targets
         with torch.no_grad():
@@ -145,7 +137,23 @@ for episode in range(num_episodes):
         current_q_target = q_values.clone().detach()
         current_q_target[action_idx] = target_q
         
+        # Log data before running backpropagation & transitioning state variables
+        training_logs.append({
+            "Episode": episode + 1,
+            "Step": step + 1,
+            "State_Moisture": current_state[0],
+            "State_Temperature": current_state[1],
+            "State_Sunlight": current_state[2],
+            "Action": action,
+            "Reward": reward,
+            "Next_Moisture": next_state[0],
+            "Next_Temperature": next_state[1],
+            "Next_Sunlight": next_state[2],
+            "Epsilon": round(epsilon, 4)
+        })
+        
         # Compute Loss & Update Neural Network Weights via Backpropagation
+        optimizer.zero_grad()
         loss = loss_fn(q_values, current_q_target)
         loss.backward()
         optimizer.step()
@@ -154,32 +162,48 @@ for episode in range(num_episodes):
         
     epsilon = max(min_epsilon, epsilon - decay_rate)
     episode_avg_rewards.append(total_episode_reward / steps_per_episode)
+    episode_penalties.append(training_penalties_count)
 
-# Export collected logs to a CSV File
+    # Periodic Validation Check (exploitation only)
+    dqn_brain.eval()
+    val_rewards_this_ep = []
+    val_penalties_this_ep = []
+    with torch.no_grad():
+        for _ in range(5):
+            val_state = random.choice(state_space)
+            val_ep_reward = 0
+            val_ep_penalties = 0
+            for _ in range(steps_per_episode):
+                val_tensor = state_to_tensor(val_state)
+                val_q_values = dqn_brain(val_tensor)
+                val_action_idx = torch.argmax(val_q_values).item()
+                val_reward = get_reward(val_state, val_action_idx)
+                val_ep_reward += val_reward
+                if val_reward < 0:
+                    val_ep_penalties += 1
+                val_state = simulate_environment(val_state, val_action_idx)
+            val_rewards_this_ep.append(val_ep_reward / steps_per_episode)
+            val_penalties_this_ep.append(val_ep_penalties)
+    dqn_brain.train()
+    episode_val_rewards.append(np.mean(val_rewards_this_ep))
+    episode_val_penalties.append(np.mean(val_penalties_this_ep))
+
+# Export collected DQN logs to a CSV File
 df_logs = pd.DataFrame(training_logs)
-df_logs.to_csv("DQN_greenhouse_training_logs.csv", index=False)
-print("Training data successfully saved to 'DQN_greenhouse_training_logs.csv'!")
+df_logs.to_csv("dqn_greenhouse_training_logs.csv", index=False)
+print("DQN Training data successfully saved to 'dqn_greenhouse_training_logs.csv'!")
+
+# Export validation logs to a CSV File
+df_val_logs = pd.DataFrame({
+    "Episode": range(1, num_episodes + 1),
+    "Val_Reward": episode_val_rewards,
+    "Val_Penalties": episode_val_penalties
+})
+df_val_logs.to_csv("dqn_greenhouse_validation_logs.csv", index=False)
+print("DQN Validation data successfully saved to 'dqn_greenhouse_validation_logs.csv'!")
 
 # ==========================================
-# 3. VALIDATION PHASE
-# ==========================================
-print("Running Validation Phase...")
-validation_rewards = []
-dqn_brain.eval()
-with torch.no_grad():
-    for _ in range(10):
-        current_state = random.choice(state_space)
-        total_val_reward = 0
-        for _ in range(steps_per_episode):
-            state_tensor = state_to_tensor(current_state)
-            q_values = dqn_brain(state_tensor)
-            action_idx = torch.argmax(q_values).item()
-            total_val_reward += get_reward(current_state, action_idx)
-            current_state = simulate_environment(current_state, action_idx)
-        validation_rewards.append(total_val_reward / steps_per_episode)
-
-# ==========================================
-# 4. LIVE TESTING PHASE
+# 3. VALIDATION & TESTING PHASE
 # ==========================================
 print("Running Live Testing Phase with Frozen Parameters...")
 test_steps = 100
@@ -207,26 +231,29 @@ print("Evaluation Complete. Rendering Visual Plots...")
 # ==========================================
 # PLOTTING DIAGRAMS
 # ==========================================
-plt.figure(figsize=(10, 4))
-plt.plot(range(1, num_episodes + 1), episode_avg_rewards, color='teal', marker='o', markersize=4, label='DQN Avg Reward per Episode')
-plt.title('Training Phase: DQN Performance Convergence (100 Episodes)')
-plt.xlabel('Episodes')
-plt.ylabel('Average Reward (Per Step)')
-plt.grid(True, linestyle='--', alpha=0.5)
-plt.legend()
-plt.tight_layout()
+# 1. Training vs Validation Reward & Penalty Curves
+fig1, axes1 = plt.subplots(2, 1, figsize=(12, 9))
 
-plt.figure(figsize=(12, 5))
-plt.step(range(test_steps), moisture_history, label='Moisture Level', color='blue', alpha=0.8, where='mid')
-plt.step(range(test_steps), temp_history, label='Temperature Level', color='red', alpha=0.8, where='mid')
-plt.step(range(test_steps), sun_history, label='Sunlight Level', color='gold', alpha=0.8, where='mid')
-plt.axhline(y=1, color='green', linestyle=':', linewidth=2, label='Target Zone (Optimal/Medium)')
-plt.yticks([0, 1, 2], ['Low / Dry', 'Optimal / Medium', 'High / Wet'])
-plt.title('Validation Phase: DQN Controlled Environment Stability Tracker')
-plt.xlabel('Test Step Duration')
-plt.ylabel('Environmental Status')
-plt.grid(True, alpha=0.3)
-plt.legend(loc='upper right')
-plt.tight_layout()
+# Training vs Validation Reward Curves
+axes1[0].plot(range(1, num_episodes + 1), episode_avg_rewards, color='teal', marker='o', markersize=3, linestyle='--', alpha=0.7, label='DQN Training Avg Reward')
+axes1[0].plot(range(1, num_episodes + 1), episode_val_rewards, color='darkgreen', marker='s', markersize=3, linestyle='-', linewidth=2, label='DQN Validation Avg Reward')
+axes1[0].set_title('DQN Performance: Training vs. Validation Avg Reward')
+axes1[0].set_xlabel('Episodes')
+axes1[0].set_ylabel('Average Reward (Per Step)')
+axes1[0].grid(True, linestyle='--', alpha=0.5)
+axes1[0].legend()
+
+# Training vs Validation Penalty Counts
+axes1[1].plot(range(1, num_episodes + 1), episode_penalties, color='orange', marker='o', markersize=3, linestyle='--', alpha=0.7, label='DQN Training Penalties')
+axes1[1].plot(range(1, num_episodes + 1), episode_val_penalties, color='red', marker='s', markersize=3, linestyle='-', linewidth=2, label='DQN Validation Penalties')
+axes1[1].set_title('DQN Safety: Training vs. Validation Penalty Count per Episode')
+axes1[1].set_xlabel('Episodes')
+axes1[1].set_ylabel('Number of Penalties (Steps with Reward < 0)')
+axes1[1].grid(True, linestyle='--', alpha=0.5)
+axes1[1].legend()
+
+fig1.tight_layout()
+fig1.savefig('dqn_val_results.png', dpi=300)
+print("DQN training/validation visualization saved successfully as 'dqn_val_results.png'!")
 
 plt.show()

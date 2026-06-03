@@ -1,0 +1,26 @@
+====================================================================================
+                              MODEL COMPARISON METRICS SUMMARY           
+====================================================================================
+Metric                              | Tabular Q-Learning     | Deep Q-Network (DQN)
+------------------------------------------------------------------------------------
+RL PARAMETERS (CONFIGURED):
+  Learning Rate (alpha)             | 0.2000                 | 0.0100                
+  Discount Factor (gamma)           | 0.9000                 | 0.9000                
+  Initial Exploration (epsilon)     | 1.0000                 | 0.9000                
+  Minimum Epsilon (min_epsilon)     | 0.0500                 | 0.0500                
+  Epsilon Decay Rate (decay_rate)   | 0.0200                 | 0.0200                
+------------------------------------------------------------------------------------
+TRAINING PHASE:
+  Overall Avg Reward/Step           |                 8.1012 |                 7.0350
+  Final Avg Reward/Step (Ep 81-100) |                 9.5230 |                 8.9830
+  Total Penalties (Ep 1-20)         |                     83 |                     84
+  Total Penalties (Ep 81-100)       |                      1 |                      5
+  Penalty Reduction Rate (%)        |                 98.80% |                 94.05%
+------------------------------------------------------------------------------------
+VALIDATION PHASE (Periodic exploitation evaluation):
+  Overall Avg Reward/Step           |                 9.2512 |                 6.8867
+  Final Avg Reward/Step (Ep 81-100) |                 9.5870 |                 8.8480
+  Total Avg Penalties (Ep 1-20)     |                   0.20 |                  57.20
+  Total Avg Penalties (Ep 81-100)   |                   1.60 |                   5.40
+  Penalty Reduction Rate (%)        |               -700.00% |                 90.56%
+====================================================================================

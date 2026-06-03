@@ -56,6 +56,9 @@ def simulate_environment(state, action):
 
 print("Running Training Phase (100 Episodes)...")
 episode_avg_rewards = []
+episode_penalties = []
+episode_val_rewards = []
+episode_val_penalties = []
 
 # Container to hold step-by-step logs for CSV export
 training_logs = []
@@ -63,6 +66,7 @@ training_logs = []
 for episode in range(num_episodes):
     current_state = random.choice(state_space)
     total_episode_reward = 0
+    training_penalties_count = 0
     
     for step in range(steps_per_episode):
         state_idx = state_space.index(current_state)
@@ -75,7 +79,9 @@ for episode in range(num_episodes):
         action = actions[action_idx]
         reward = get_reward(current_state, action)
         total_episode_reward += reward
-        
+        if reward < 0:
+            training_penalties_count += 1
+            
         next_state = simulate_environment(current_state, action)
         next_idx = state_space.index(next_state)
         best_future_q = np.max(q_table[next_idx])
@@ -103,11 +109,42 @@ for episode in range(num_episodes):
     # Calculate the average reward for this specific episode
     avg_reward = total_episode_reward / steps_per_episode
     episode_avg_rewards.append(avg_reward)
+    episode_penalties.append(training_penalties_count)
+    
+    # Periodic Validation Check (exploitation only)
+    val_rewards_this_ep = []
+    val_penalties_this_ep = []
+    for _ in range(5):
+        val_state = random.choice(state_space)
+        val_ep_reward = 0
+        val_ep_penalties = 0
+        for _ in range(steps_per_episode):
+            val_state_idx = state_space.index(val_state)
+            val_action_idx = np.argmax(q_table[val_state_idx])
+            val_reward = get_reward(val_state, actions[val_action_idx])
+            val_ep_reward += val_reward
+            if val_reward < 0:
+                val_ep_penalties += 1
+            val_state = simulate_environment(val_state, actions[val_action_idx])
+        val_rewards_this_ep.append(val_ep_reward / steps_per_episode)
+        val_penalties_this_ep.append(val_ep_penalties)
+    
+    episode_val_rewards.append(np.mean(val_rewards_this_ep))
+    episode_val_penalties.append(np.mean(val_penalties_this_ep))
 
 # Export collected logs to a CSV File
 df_logs = pd.DataFrame(training_logs)
 df_logs.to_csv("rl_greenhouse_training_logs.csv", index=False)
 print("Training data successfully saved to 'rl_greenhouse_training_logs.csv'!")
+
+# Export validation logs to a CSV File
+df_val_logs = pd.DataFrame({
+    "Episode": range(1, num_episodes + 1),
+    "Val_Reward": episode_val_rewards,
+    "Val_Penalties": episode_val_penalties
+})
+df_val_logs.to_csv("rl_greenhouse_validation_logs.csv", index=False)
+print("Validation data successfully saved to 'rl_greenhouse_validation_logs.csv'!")
 
 # 2. VALIDATION PHASE
 print("Running Validation Phase...")
@@ -148,29 +185,29 @@ for _ in range(test_steps):
 print("Testing complete. Plotting results...")
 
 # PLOTTING
-# Training Evaluation (Average Reward per Episode)
-plt.figure(figsize=(10, 4))
-plt.plot(range(1, num_episodes + 1), episode_avg_rewards, color='teal', marker='o', markersize=4, linestyle='-', linewidth=1.5, label='Avg Reward per Episode')
-plt.title('Training Phase: Performance Evaluation (100 Episodes)')
-plt.xlabel('Episodes')
-plt.ylabel('Average Reward (Per Step)')
-plt.grid(True, linestyle='--', alpha=0.5)
-plt.legend()
-plt.tight_layout()
+# 1. Training vs Validation Reward & Penalty Curves
+fig1, axes1 = plt.subplots(2, 1, figsize=(12, 9))
 
-# Testing Phase (Greenhouse Stability Tracker)
-plt.figure(figsize=(12, 5))
-plt.step(range(test_steps), moisture_history, label='Moisture Level', color='blue', alpha=0.8, where='mid')
-plt.step(range(test_steps), temp_history, label='Temperature Level', color='red', alpha=0.8, where='mid')
-plt.step(range(test_steps), sun_history, label='Sunlight Level', color='gold', alpha=0.8, where='mid')
+# Training vs Validation Reward Curves
+axes1[0].plot(range(1, num_episodes + 1), episode_avg_rewards, color='teal', marker='o', markersize=3, linestyle='--', alpha=0.7, label='Training Avg Reward')
+axes1[0].plot(range(1, num_episodes + 1), episode_val_rewards, color='darkgreen', marker='s', markersize=3, linestyle='-', linewidth=2, label='Validation Avg Reward')
+axes1[0].set_title('Q-Learning Performance: Training vs. Validation Avg Reward')
+axes1[0].set_xlabel('Episodes')
+axes1[0].set_ylabel('Average Reward (Per Step)')
+axes1[0].grid(True, linestyle='--', alpha=0.5)
+axes1[0].legend()
 
-plt.axhline(y=1, color='green', linestyle=':', linewidth=2, label='Target Zone (Optimal/Medium)')
-plt.yticks([0, 1, 2], ['Low / Dry', 'Optimal / Medium', 'High / Wet'])
-plt.title('Testing Phase: Automated Greenhouse Resource Metrics over 100 Steps')
-plt.xlabel('Test Step Duration')
-plt.ylabel('Environmental Status')
-plt.grid(True, alpha=0.3)
-plt.legend(loc='upper right')
-plt.tight_layout()
+# Training vs Validation Penalty Counts
+axes1[1].plot(range(1, num_episodes + 1), episode_penalties, color='orange', marker='o', markersize=3, linestyle='--', alpha=0.7, label='Training Penalties')
+axes1[1].plot(range(1, num_episodes + 1), episode_val_penalties, color='red', marker='s', markersize=3, linestyle='-', linewidth=2, label='Validation Penalties')
+axes1[1].set_title('Q-Learning Safety: Training vs. Validation Penalty Count per Episode')
+axes1[1].set_xlabel('Episodes')
+axes1[1].set_ylabel('Number of Penalties (Steps with Reward < 0)')
+axes1[1].grid(True, linestyle='--', alpha=0.5)
+axes1[1].legend()
+
+fig1.tight_layout()
+fig1.savefig('qlearning_val_results.png', dpi=300)
+print("Q-learning training/validation visualization saved successfully as 'qlearning_val_results.png'!")
 
 plt.show()
